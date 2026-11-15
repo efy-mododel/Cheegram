@@ -14,3 +14,8 @@ TMessagesProj_AppHockeyApp/afat/
 TMessagesProj_AppStandalone/afat/
 TMessagesProj_AppHuawei/afat/
 TMessagesProj/jni/ffmpeg/build_android
+# Готовые APK/AAB лежат в папке apk/, но в git не коммитятся
+# (бинарные артефакты сборки, десятки МБ) — см. apk/README.md
+apk/*.apk
+apk/*.aab
+apk/.build-out/

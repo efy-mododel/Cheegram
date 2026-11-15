@@ -44,3 +44,15 @@ You will require Android Studio 2025.1.4, Android NDK 27.2.12479018 and Android 
 ### Localization
 
 We moved all translations to https://translations.telegram.org/en/android/. Please use it.
+
+### Готовый APK (Cheegram)
+
+Готовый APK мессенджера лежит в папке [`apk/`](apk/README.md):
+
+```bash
+./apk/download-apk.sh   # скачать APK из GitHub Releases в apk/
+./apk/build-apk.sh      # собрать APK локально через Docker в apk/
+```
+
+Либо запустите workflow **Build APK** во вкладке Actions — APK соберётся в CI
+и попадёт в GitHub Release. Подробнее — в [`apk/README.md`](apk/README.md).

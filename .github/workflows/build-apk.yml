@@ -1,0 +1,137 @@
+name: Build APK
+
+# Сборка полноценного APK Cheegram (Telegram 13.2.2) из исходников.
+# Запуск: Actions -> Build APK -> Run workflow.
+# Результат: artifact запуска + APK в GitHub Release (тег v13.2.2-7303).
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: "Что собирать"
+        required: true
+        default: "standalone"
+        type: choice
+        options:
+          - standalone
+          - release
+          - all
+      create_release:
+        description: "Создать/обновить GitHub Release с APK"
+        required: true
+        default: true
+        type: boolean
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION_NAME=$(grep -E '^APP_VERSION_NAME=' gradle.properties | cut -d= -f2)
+          VERSION_CODE=$(grep -E '^APP_VERSION_CODE=' gradle.properties | cut -d= -f2)
+          echo "name=${VERSION_NAME}" >> "$GITHUB_OUTPUT"
+          echo "code=${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION_NAME}-${VERSION_CODE}" >> "$GITHUB_OUTPUT"
+          echo "Cheegram ${VERSION_NAME} (${VERSION_CODE})"
+
+      - name: Build Docker image (SDK 36, NDK 27.2, JDK 17)
+        run: docker build -t cheegram-builder .
+
+      - name: Build APK inside container
+        env:
+          VARIANT: ${{ inputs.variant || 'standalone' }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/home/source" \
+            -e VARIANT="$VARIANT" \
+            cheegram-builder \
+            bash -c '
+              set -e
+              mkdir -p /home/source/TMessagesProj/build/outputs/apk /home/gradle
+              tar -C /home/source \
+                --exclude=./.git --exclude=.cxx --exclude=build --exclude=.gradle --exclude=./local.properties \
+                -cf - . | tar -C /home/gradle -xf -
+              cd /home/gradle
+              case "$VARIANT" in
+                standalone)
+                  gradle --parallel :TMessagesProj_AppStandalone:assembleAfatStandalone --stacktrace
+                  ;;
+                release)
+                  gradle --parallel :TMessagesProj_App:assembleAfatRelease --stacktrace
+                  ;;
+                all)
+                  gradle --parallel \
+                    :TMessagesProj_AppStandalone:assembleAfatStandalone \
+                    :TMessagesProj_App:assembleAfatRelease \
+                    :TMessagesProj_App:bundleAfatRelease --stacktrace
+                  ;;
+                *)
+                  echo "Unknown variant: $VARIANT" >&2; exit 1
+                  ;;
+              esac
+              mkdir -p /home/source/apk/.build-out
+              find /home/gradle -path "*build/outputs/apk*" -name "*.apk" -exec cp -v {} /home/source/apk/.build-out/ \;
+              find /home/gradle -path "*build/outputs/bundle*" -name "*.aab" -exec cp -v {} /home/source/apk/.build-out/ \; || true
+            '
+
+      - name: Collect APK into apk/ folder
+        env:
+          VARIANT: ${{ inputs.variant || 'standalone' }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -e
+          mkdir -p apk
+          shopt -s nullglob
+          apks=(apk/.build-out/*.apk)
+          if [ "${#apks[@]}" -eq 0 ]; then
+            echo "No APK found" >&2
+            ls -laR apk/ || true
+            exit 1
+          fi
+          if [ "${#apks[@]}" -eq 1 ]; then
+            cp -v "${apks[0]}" "apk/Cheegram-${VERSION_NAME}-${VERSION_CODE}-${VARIANT}.apk"
+          else
+            i=1
+            for f in "${apks[@]}"; do
+              cp -v "$f" "apk/Cheegram-${VERSION_NAME}-${VERSION_CODE}-$i.apk"
+              i=$((i+1))
+            done
+          fi
+          for aab in apk/.build-out/*.aab; do
+            cp -v "$aab" "apk/Cheegram-${VERSION_NAME}-${VERSION_CODE}.aab"
+          done
+          rm -rf apk/.build-out
+          (cd apk && sha256sum *.apk *.aab 2>/dev/null | tee CHECKSUMS.txt)
+          ls -lh apk/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cheegram-${{ steps.version.outputs.name }}-${{ steps.version.outputs.code }}
+          path: apk/*.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name == 'push' || inputs.create_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: Cheegram ${{ steps.version.outputs.name }} (${{ steps.version.outputs.code }})
+          files: |
+            apk/*.apk
+            apk/*.aab
+            apk/CHECKSUMS.txt
+          fail_on_unmatched_files: false
