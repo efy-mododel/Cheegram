@@ -1,0 +1,3 @@
+# Сюда кладётся готовый APK после сборки (./apk/build-apk.sh)
+# или скачивания из GitHub Releases (./apk/download-apk.sh).
+# Сами .apk/.aab в git не коммитятся — см. .gitignore.
